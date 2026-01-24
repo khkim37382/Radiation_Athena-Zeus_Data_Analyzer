@@ -7,29 +7,24 @@ from openpyxl import Workbook
 from openpyxl.styles import PatternFill, Alignment, Font
 from openpyxl.utils import get_column_letter
 
-# Constant number of blackboxes
+
 NUM_BLACKBOXES = 8192
 
-# Number of flip-flops per shift register (SR0–SR59)
-# Index corresponds to SR number
+# SR0–SR59 (Athena) FF count per SR
 FF_PER_SR = [
     4, 4, 1, 4, 1, 1, 2, 2, 2, 2, 1, 2, 2, 2, 1, 1,
     2, 6, 6, 6, 2, 4, 4, 4, 4, 4, 2, 2, 2, 2, 2, 4,
     6, 6, 1, 5, 5, 3, 4, 4, 4, 4, 1, 2, 3, 2, 2, 4,
     4, 1, 4, 4, 1, 2, 3, 3, 1, 1, 1, 2
 ]
+NUM_SRS = len(FF_PER_SR)
 
-# Total number of shift registers
-ATHENA_NUM_SRS = len(FF_PER_SR)
 
-# Scaling constants for FIT calculation
 FIT_SCALE = 1.0e15
 FIT_FACTOR = 0.001
 
 
 def safe_float(x, default=0.0) -> float:
-    # Safely convert a value to float
-    # Returns default if conversion fails or value is missing
     try:
         if x is None:
             return default
@@ -41,8 +36,6 @@ def safe_float(x, default=0.0) -> float:
 
 
 def get_timestamp(s: str) -> dt.datetime:
-    # Parse a timestamp string using known formats
-    # Falls back to a dummy timestamp if parsing fails
     s = str(s).strip()
     for fmt in ("%m/%d/%Y %H:%M:%S", "%d/%m/%Y %H:%M:%S", "%H:%M:%S"):
         try:
@@ -102,7 +95,6 @@ def infer_fluence_from_particle_and_duration(particle: str, duration_s: float) -
 
 def parse_seu_filename(stem: str) -> dict:
     # Extract metadata fields from SEU filename
-    # Assumes fixed underscore-delimited naming convention
     parts = stem.split("_")
 
     meta = {
@@ -122,6 +114,7 @@ def parse_seu_filename(stem: str) -> dict:
         "actual_freq": "0.0",
     }
 
+    # Expected pattern: <run>_<...>_<vdd>_<input>_<particle>_<freq>_<temp>_<board>_SEU
     if len(parts) >= 9 and parts[-1].upper() == "SEU":
         meta["run"] = parts[0]
         meta["vdd_core"] = parts[2]
@@ -131,6 +124,7 @@ def parse_seu_filename(stem: str) -> dict:
         meta["temperature"] = parts[6]
         meta["board"] = parts[7]
         meta["die"] = meta["board"]
+        meta["actual_freq"] = parts[5]
 
     return meta
 
@@ -176,7 +170,7 @@ def load_fluence_map_from_run_log(run_log_path: Path) -> dict:
     return fluences
 
 
-def compute_errors_per_sr(csv_path: Path, sr_count: int = ATHENA_NUM_SRS) -> pd.Series:
+def compute_errors_per_sr(csv_path: Path, sr_count: int = NUM_SRS) -> pd.Series:
     # Read SEU CSV and sum errors per shift register
     df = pd.read_csv(csv_path)
 
@@ -220,8 +214,34 @@ def compute_errors_per_sr(csv_path: Path, sr_count: int = ATHENA_NUM_SRS) -> pd.
     return full
 
 
-def build_summary_excel(folder: str, out_xlsx: str, sr_count: int = ATHENA_NUM_SRS) -> None:
-    # Main routine: parse all SEU CSVs and build Excel summary
+def resolve_fluence(meta: dict, fpath: Path, fluence_map: dict) -> float:
+    # Resolve fluence from RUN_LOG if possible, else infer from duration+particle
+    stem = fpath.stem
+    run_id = build_run_id_from_seu_stem(stem)
+    if run_id in fluence_map:
+        meta["fluence"] = str(fluence_map[run_id])
+
+    fluence = safe_float(meta.get("fluence"), 0.0)
+    if fluence <= 0.0:
+        duration_s = compute_duration_seconds_from_seu_csv(fpath)
+        fluence = infer_fluence_from_particle_and_duration(meta.get("particle", ""), duration_s)
+        meta["fluence"] = str(fluence)
+
+    return float(fluence)
+
+
+def compute_cross_section(err_cnt: int, sr_index: int, fluence: float) -> float:
+    """
+    CrossSection/FF (cm^2) = errors / (fluence * total_FF)
+    total_FF = NUM_BLACKBOXES * FF_PER_SR[sr_index]
+    """
+    total_ffs = NUM_BLACKBOXES * int(FF_PER_SR[sr_index])
+    denom = float(fluence) * float(total_ffs)
+    return (float(err_cnt) / denom) if denom > 0 else 0.0
+
+
+def build_summary_excel(folder: str, out_xlsx: str, sr_count: int = NUM_SRS) -> None:
+    # Main routine: parse all SEU CSVs and build Excel summary (red blocks)
     if sr_count != len(FF_PER_SR):
         raise ValueError("SR count mismatch with FF_PER_SR")
 
@@ -283,20 +303,8 @@ def build_summary_excel(folder: str, out_xlsx: str, sr_count: int = ATHENA_NUM_S
 
     # Process each SEU run and create a results block
     for idx, fpath in enumerate(seu_files):
-        stem = fpath.stem
-        meta = parse_seu_filename(stem)
-
-        run_id = build_run_id_from_seu_stem(stem)
-        if run_id in fluence_map:
-            meta["fluence"] = str(fluence_map[run_id])
-
-        fluence = safe_float(meta.get("fluence"), 0.0)
-        if fluence <= 0.0:
-            duration_s = compute_duration_seconds_from_seu_csv(fpath)
-            fluence = infer_fluence_from_particle_and_duration(
-                meta.get("particle", ""), duration_s
-            )
-            meta["fluence"] = str(fluence)
+        meta = parse_seu_filename(fpath.stem)
+        fluence = resolve_fluence(meta, fpath, fluence_map)
 
         errors = compute_errors_per_sr(fpath, sr_count)
         start_col = block_start_col + idx * (block_width + gap)
@@ -326,24 +334,102 @@ def build_summary_excel(folder: str, out_xlsx: str, sr_count: int = ATHENA_NUM_S
             err_i = int(errors.iloc[i])
             ws.cell(row=table_start_row + 1 + i, column=start_col, value=err_i).alignment = center
 
-            total_ffs = NUM_BLACKBOXES * FF_PER_SR[i]
-            denom = fluence * float(total_ffs)
-            xs_per_ff = (err_i / denom) if denom > 0 else 0.0
+            xs_per_ff = compute_cross_section(err_i, i, fluence)
             ws.cell(row=table_start_row + 1 + i, column=start_col + 1, value=xs_per_ff).alignment = center
 
             # FIT = cross section per FF × 1e15 × scaling factor
-            fit = round(xs_per_ff * FIT_SCALE * FIT_FACTOR, 2)
+            fit = xs_per_ff * FIT_SCALE * FIT_FACTOR
             ws.cell(row=table_start_row + 1 + i, column=start_col + 2, value=fit).alignment = center
 
     wb.save(out_xlsx)
+
+
+def build_long_format_excel(folder: str, out_long_xlsx: str, sr_count: int = NUM_SRS) -> None:
+    """
+    Long format: one row per (run, SR) with cs == CrossSection/FF from the summary blocks.
+    """
+    folder_path = Path(folder)
+    fluence_map = load_fluence_map_from_run_log(folder_path / "RUN_LOG.csv")
+
+    seu_files = sorted(
+        [p for p in folder_path.iterdir()
+         if p.is_file() and p.name.upper().endswith("_SEU.CSV")],
+        key=lambda p: (extract_run_number_from_path(p), p.name)
+    )
+
+    rows = []
+    for fpath in seu_files:
+        meta = parse_seu_filename(fpath.stem)
+        fluence = resolve_fluence(meta, fpath, fluence_map)
+        errors = compute_errors_per_sr(fpath, sr_count)
+
+        # Stable "id" per run (adjust if you want a different convention)
+        parts = fpath.stem.split("_")
+        run_id_like = "_".join(parts[:4]) if len(parts) >= 4 else fpath.stem
+
+        vdd = safe_float(meta.get("vdd_core"), 0.0)
+        freq = safe_float(meta.get("frequency"), 0.0)
+        actual_freq = safe_float(meta.get("actual_freq"), freq)
+
+        for sr in range(sr_count):
+            err_cnt = int(errors.iloc[sr])
+            ff_per_bb = int(FF_PER_SR[sr])
+
+            cs = compute_cross_section(err_cnt, sr, fluence)
+            fit = cs * FIT_SCALE * FIT_FACTOR
+
+            rows.append({
+                "id": run_id_like,
+                "run": meta.get("run", "---"),
+                "vdd": vdd,
+                "input": meta.get("input_bits", "---"),
+                "ion": meta.get("particle", "---"),
+                "temp": meta.get("temperature", "---"),
+                "freq": freq,
+                "brd": meta.get("board", "---"),
+                "actual_freq": actual_freq,
+                "fluence": float(fluence),
+                "die": meta.get("die", "---"),
+                "# of blackboxes": NUM_BLACKBOXES,
+                "# of FF/BB": ff_per_bb,
+                "SR_NUM": sr,
+                "err_cnt": err_cnt,
+                "cs": cs,
+                "upper": 0.0,
+                "lower": 0.0,
+                "FIT": fit,
+                "source_file": fpath.name,
+            })
+
+    df = pd.DataFrame(rows)
+
+    col_order = [
+        "id", "run", "vdd", "input", "ion", "temp", "freq", "brd", "actual_freq",
+        "fluence", "die", "# of blackboxes", "# of FF/BB", "SR_NUM", "err_cnt",
+        "cs", "upper", "lower", "FIT", "source_file"
+    ]
+    df = df[[c for c in col_order if c in df.columns]]
+
+    with pd.ExcelWriter(out_long_xlsx, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name="LongFormat", index=False)
+
+        # Basic column width cleanup
+        ws = writer.book["LongFormat"]
+        for j, col in enumerate(df.columns, start=1):
+            width = max(10, min(40, len(col) + 2))
+            ws.column_dimensions[get_column_letter(j)].width = width
 
 
 if __name__ == "__main__":
     # Input folder containing SEU CSVs and RUN_LOG.csv
     folder = "/Users/kyuhyunkim/Desktop/script_things/N3_alpha10U"
 
-    # Output Excel summary path
-    out_xlsx = "/Users/kyuhyunkim/Desktop/summary.xlsx"
+    # Output Excel summary paths
+    out_summary_xlsx = "/Users/kyuhyunkim/Desktop/summary.xlsx"
+    out_long_xlsx = "/Users/kyuhyunkim/Desktop/summary_long.xlsx"
 
-    build_summary_excel(folder, out_xlsx)
-    print(f"Saved: {out_xlsx}")
+    build_summary_excel(folder, out_summary_xlsx)
+    build_long_format_excel(folder, out_long_xlsx)
+
+    print(f"Saved summary: {out_summary_xlsx}")
+    print(f"Saved long format: {out_long_xlsx}")
