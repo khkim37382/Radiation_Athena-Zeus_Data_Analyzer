@@ -37,7 +37,7 @@ def safe_float(x, default=0.0) -> float:
 
 def get_timestamp(s: str) -> dt.datetime:
     s = str(s).strip()
-    for fmt in ("%m/%d/%Y %H:%M:%S", "%d/%m/%Y %H:%M:%S", "%H:%M:%S"):
+    for fmt in ("%m/%d/%Y %H:%M:%S", "%d/%m/%Y %H:%M:%S", "%H:%M:%S", "%m/%d/%y %H:%M"):
         try:
             return dt.datetime.strptime(s, fmt)
         except Exception:
@@ -422,11 +422,11 @@ def build_long_format_excel(folder: str, out_long_xlsx: str, sr_count: int = NUM
 
 if __name__ == "__main__":
     # Input folder containing SEU CSVs and RUN_LOG.csv
-    folder = "/Users/kyuhyunkim/Desktop/script_things/N3_alpha10U"
+    folder = "/Users/jennakronenberg/Desktop/N3hf/"
 
     # Output Excel summary paths
-    out_summary_xlsx = "/Users/kyuhyunkim/Desktop/summary.xlsx"
-    out_long_xlsx = "/Users/kyuhyunkim/Desktop/summary_long.xlsx"
+    out_summary_xlsx = "/Users/jennakronenberg/Desktop/N3hf/summary.xlsx"
+    out_long_xlsx = "/Users/jennakronenberg/Desktop/N3hf/summary_long.xlsx"
 
     build_summary_excel(folder, out_summary_xlsx)
     build_long_format_excel(folder, out_long_xlsx)
