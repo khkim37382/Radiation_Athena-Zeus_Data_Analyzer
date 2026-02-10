@@ -15,7 +15,7 @@ except Exception:
     chi2 = None
     _HAVE_SCIPY = False
 
-RO_XLSX_PATH = "/Users/kyuhyunkim/Desktop/N3_Function_RO.xlsx"
+RO_XLSX_PATH = "/Users/jennakronenberg/Desktop/N3_Function_RO.xlsx"
 
 NUM_BLACKBOXES = 8192
 
@@ -60,7 +60,8 @@ def parse_freq_key(freq_token: str) -> float:
             return float(s)
         n = float(s)
         if n >= 10:
-            return n / 1000.0
+            #return n / 1000.0
+            return n
         return n
     except Exception:
         return 0.0
@@ -173,6 +174,8 @@ class ROData:
                         mv = int(round(safe_float(v.upper().replace("MV", "").strip(), 0.0)))
                         if mv == vdd_mv:
                             base_mhz = safe_float(ws.cell(r, freq_col).value, 0.0)
+                            if(base_mhz < 1): 
+                                return base_mhz * 1000
                             return base_mhz * 128.0
                 return 0.0
 
@@ -195,7 +198,7 @@ class ROData:
         if not headers:
             return 0.0
 
-        freq_col = headers.get(freq_key)
+        freq_col = headers.get(freq_key/1000)
         if freq_col is None:
             nearest = self._closest_numeric(freq_key, list(headers.keys()))
             freq_col = headers.get(nearest)
@@ -206,7 +209,9 @@ class ROData:
                 mv = int(round(safe_float(v.upper().replace("MV", "").strip(), 0.0)))
                 if mv == vdd_mv:
                     ghz_val = safe_float(ws.cell(r, freq_col).value, 0.0)
-                    return ghz_val * 1000.0
+                    if(ghz_val < 1): 
+                                return ghz_val * 1000
+                    return ghz_val * 128.0
 
         return 0.0
 
@@ -588,9 +593,9 @@ def build_long_format_excel(folder: str, out_long_xlsx: str, ro_data: ROData, sr
 
 
 if __name__ == "__main__":
-    folder = "/Users/kyuhyunkim/Desktop/script_things/N3_alpha10U"
-    out_summary_xlsx = "/Users/kyuhyunkim/Desktop/NTVsummary.xlsx"
-    out_long_xlsx = "/Users/kyuhyunkim/Desktop/NTVsummary_long.xlsx"
+    folder = "/Users/jennakronenberg/Desktop/N3hf"
+    out_summary_xlsx = "/Users/jennakronenberg/Desktop/N3hf/NTVsummary.xlsx"
+    out_long_xlsx = "/Users/jennakronenberg/Desktop/N3hf/NTVsummary_long.xlsx"
 
     ro_data = ROData(RO_XLSX_PATH)
     if not ro_data.available():
