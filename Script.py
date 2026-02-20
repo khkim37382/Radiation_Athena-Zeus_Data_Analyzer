@@ -16,15 +16,12 @@ except Exception:
     _HAVE_SCIPY = False
 
 
-# -----------------------------
-# USER CONFIG
-# -----------------------------
-# Update this to your machine if you want RO lookup
+
 RO_XLSX_PATH = "/Users/kyuhyunkim/Desktop/N3_Function_RO.xlsx"
 
 NUM_BLACKBOXES = 8192
 
-# Athena FF/BB (SR0..SR59) — from your pasted Athena table
+
 ATHENA_FF_PER_SR = [
     4, 4, 1, 4, 1, 1, 2, 2, 2, 2, 1, 2, 2, 2, 1, 1,
     2, 6, 6, 6, 2, 4, 4, 4, 4, 4, 2, 2, 2, 2, 2, 4,
@@ -33,8 +30,6 @@ ATHENA_FF_PER_SR = [
 ]
 ATHENA_NUM_SRS = len(ATHENA_FF_PER_SR)  # 60
 
-# Zeus FF/BB (SR0..SR59) — from your pasted Zeus table
-# NOTE: you had SR4 missing/blank; set to 0 so we don't crash (and xs/fit become 0 for SR4).
 ZEUS_FF_PER_SR = [
     4, 1, 4, 4, 0, 1, 2, 4, 2, 6, 2, 2, 3, 3, 4, 2,
     2, 1, 1, 1, 2, 4, 4, 4, 1, 1, 2, 1, 2, 2, 2, 2,
@@ -43,14 +38,9 @@ ZEUS_FF_PER_SR = [
 ]
 ZEUS_NUM_SRS = len(ZEUS_FF_PER_SR)  # 60
 
-# FIT calculation (same as your original)
 FIT_SCALE = 1.0e15
 FIT_FACTOR = 0.001
 
-
-# -----------------------------
-# Helpers
-# -----------------------------
 def safe_float(x, default=0.0) -> float:
     try:
         if x is None:
@@ -114,8 +104,6 @@ def poisson_rate_ci_95(k: int, exposure: float) -> tuple[float, float]:
         lo = 0.5 * chi2.ppf(alpha / 2, 2 * k) / exposure
         hi = 0.5 * chi2.ppf(1 - alpha / 2, 2 * (k + 1)) / exposure
         return (float(lo), float(hi))
-
-    # fallback approx
     z = 1.96
     mu = float(k)
     sigma = math.sqrt(mu) if mu > 0 else 1.0
@@ -137,10 +125,6 @@ def get_ff_per_sr(die: str, sr: int) -> int:
         return int(ATHENA_FF_PER_SR[sr])
     return 0
 
-
-# -----------------------------
-# RO Data (unchanged)
-# -----------------------------
 class ROData:
     def __init__(self, ro_path: str):
         self.path = Path(ro_path)
@@ -252,10 +236,6 @@ class ROData:
 
         return 0.0
 
-
-# -----------------------------
-# Fluence (unchanged)
-# -----------------------------
 def get_timestamp(s: str) -> dt.datetime:
     s = str(s).strip()
     for fmt in ("%m/%d/%Y %H:%M:%S", "%d/%m/%Y %H:%M:%S", "%H:%M:%S", "%m/%d/%y %H:%M"):
@@ -309,10 +289,6 @@ def infer_fluence_from_particle_and_duration(particle: str, duration_s: float) -
         return duration_s * 100_000.0
     return 0.0
 
-
-# -----------------------------
-# Parse filename (unchanged)
-# -----------------------------
 def parse_seu_filename(stem: str) -> dict:
     parts = stem.split("_")
     meta = {
@@ -396,10 +372,6 @@ def resolve_fluence(meta: dict, fpath: Path, fluence_map: dict) -> float:
 
     return float(fluence)
 
-
-# -----------------------------
-# Errors per SR (unchanged)
-# -----------------------------
 def compute_errors_per_sr(csv_path: Path, sr_count: int) -> pd.Series:
     df = pd.read_csv(csv_path)
 
@@ -439,9 +411,7 @@ def compute_errors_per_sr(csv_path: Path, sr_count: int) -> pd.Series:
     return full
 
 
-# -----------------------------
-# Actual frequency (unchanged)
-# -----------------------------
+
 def compute_actual_frequency_mhz(meta: dict, ro_data: ROData) -> float:
     freq_key = parse_freq_key(meta.get("frequency", "---"))
     if abs(freq_key - 2.5) < 1e-9:
@@ -458,9 +428,7 @@ def compute_actual_frequency_mhz(meta: dict, ro_data: ROData) -> float:
     return ro_data.lookup_actual_freq_mhz(die=die, board=board, vdd_mv=vdd_mv, freq_key=freq_key)
 
 
-# -----------------------------
-# Summary (YOUR LOGIC, fixed for Zeus)
-# -----------------------------
+
 def build_summary_excel(folder: str, out_xlsx: str, ro_data: ROData, sr_count: int = ATHENA_NUM_SRS) -> None:
     if sr_count != len(ATHENA_FF_PER_SR):
         raise ValueError("SR count mismatch with ATHENA_FF_PER_SR")
@@ -507,8 +475,6 @@ def build_summary_excel(folder: str, out_xlsx: str, ro_data: ROData, sr_count: i
 
     table_start_row = 15
 
-    # Left-side reference table (blackboxes + Athena FF/BB shown as reference)
-    # Keeping your structure, but NOTE: FF/BB differs for Zeus; per-run we use correct list.
     for i in range(sr_count):
         ws.cell(row=table_start_row + 1 + i, column=1, value=f"SR-{i}")
         ws.cell(row=table_start_row + 1 + i, column=2, value=NUM_BLACKBOXES).alignment = center
@@ -572,9 +538,6 @@ def build_summary_excel(folder: str, out_xlsx: str, ro_data: ROData, sr_count: i
     wb.save(out_xlsx)
 
 
-# -----------------------------
-# Long format (YOUR LOGIC, fixed for Zeus)
-# -----------------------------
 def build_long_format_excel(folder: str, out_long_xlsx: str, ro_data: ROData, sr_count: int = ATHENA_NUM_SRS) -> None:
     folder_path = Path(folder)
     fluence_map = load_fluence_map_from_run_log(folder_path / "RUN_LOG.csv")
@@ -654,14 +617,11 @@ def build_long_format_excel(folder: str, out_long_xlsx: str, ro_data: ROData, sr
         ws.freeze_panes = "A2"
 
 
-# -----------------------------
-# Main
-# -----------------------------
 if __name__ == "__main__":
     folder = "/Users/kyuhyunkim/Desktop/script_things/N3_alpha10U"
 
-    out_summary_xlsx = "/Users/kyuhyunkim/Desktop/NTVsummary.xlsx"
-    out_long_xlsx = "/Users/kyuhyunkim/Desktop/NTVsummary_long.xlsx"
+    out_summary_xlsx = "/Users/kyuhyunkim/Desktop/summary.xlsx"
+    out_long_xlsx = "/Users/kyuhyunkim/Desktop/summary_long.xlsx"
 
     ro_data = ROData(RO_XLSX_PATH)
     if not ro_data.available():
