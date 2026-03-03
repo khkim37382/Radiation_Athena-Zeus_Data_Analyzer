@@ -17,7 +17,7 @@ except Exception:
 
 
 
-RO_XLSX_PATH = "/Users/kyuhyunkim/Desktop/N3_Function_RO.xlsx"
+RO_XLSX_PATH = "/Users/jennakronenberg/Library/CloudStorage/Box-Box/3nm_Project/N3_Function_RO.xlsx"
 
 NUM_BLACKBOXES = 8192
 
@@ -53,11 +53,16 @@ def safe_float(x, default=0.0) -> float:
 
 
 def infer_die_category(board: str) -> str:
-    b = (board or "").strip().lower()
-    if "athena" in b:
-        return "Athena"
-    if "zeus" in b:
+    b = (board or "").strip().upper()
+    if "ZEUS" in b:
         return "Zeus"
+    elif "ATHENA" in b:
+        return "Athena"
+    elif "A-" in b:
+        return "Athena"
+    else:
+        return "Zeus"
+    
     return "---"
 
 
@@ -618,10 +623,10 @@ def build_long_format_excel(folder: str, out_long_xlsx: str, ro_data: ROData, sr
 
 
 if __name__ == "__main__":
-    folder = "/Users/kyuhyunkim/Desktop/script_things/N3_alpha10U"
+    folder = "/Users/jennakronenberg/Desktop/Analyzed"
 
-    out_summary_xlsx = "/Users/kyuhyunkim/Desktop/summary.xlsx"
-    out_long_xlsx = "/Users/kyuhyunkim/Desktop/summary_long.xlsx"
+    out_summary_xlsx = "/Users/jennakronenberg/Desktop/Analyzed/summary.xlsx"
+    out_long_xlsx = "/Users/jennakronenberg/Desktop/Analyzed/summary_long.xlsx"
 
     ro_data = ROData(RO_XLSX_PATH)
     if not ro_data.available():
