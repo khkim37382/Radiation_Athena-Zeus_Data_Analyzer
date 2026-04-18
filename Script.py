@@ -66,6 +66,29 @@ def infer_die_category(board: str) -> str:
     return "---"
 
 
+def build_die_display(die: str, board: str) -> str:
+    """
+    Combine die type with board suffix for a display label like 'Athena-8.9' or 'Zeus-4.2'.
+    Strips any leading die-type prefix from the board name to avoid duplication.
+    """
+    die_str = (die or "---").strip()
+    board_str = (board or "---").strip()
+
+    if die_str == "---" or board_str == "---":
+        return die_str
+
+    b_upper = board_str.upper()
+
+    # Remove known die-type prefixes so we don't get "Athena-ATHENA-8.9"
+    for prefix in ("ATHENA-", "ZEUS-", "A-", "Z-"):
+        if b_upper.startswith(prefix):
+            suffix = board_str[len(prefix):]
+            return f"{die_str}-{suffix}"
+
+    # Board has no recognisable prefix – just append it whole
+    return f"{die_str}-{board_str}"
+
+
 def parse_freq_key(freq_token: str) -> float:
     s = str(freq_token).strip()
     if not s:
@@ -118,9 +141,6 @@ def poisson_rate_ci_95(k: int, exposure: float) -> tuple[float, float]:
 
 
 def get_ff_per_sr(die: str, sr: int) -> int:
-    """
-    NEW: choose Athena vs Zeus FF/BB list based on die.
-    """
     if (die or "").strip().lower() == "zeus":
         if 0 <= sr < len(ZEUS_FF_PER_SR):
             return int(ZEUS_FF_PER_SR[sr])
@@ -302,6 +322,7 @@ def parse_seu_filename(stem: str) -> dict:
         "vdd_core": "---",
         "vdd_io": "1.2",
         "die": "---",
+        "die_display": "---",   # NEW: e.g. "Athena-8.9" or "Zeus-4.2"
         "particle": "---",
         "run": "---",
         "code_used": "LSB",
@@ -322,6 +343,9 @@ def parse_seu_filename(stem: str) -> dict:
         meta["temperature"] = parts[6]
         meta["board"] = parts[7]
         meta["die"] = infer_die_category(meta["board"])
+
+    # Build the combined die+board display label
+    meta["die_display"] = build_die_display(meta["die"], meta["board"])
 
     return meta
 
@@ -457,12 +481,13 @@ def build_summary_excel(folder: str, out_xlsx: str, ro_data: ROData, sr_count: i
     center = Alignment(horizontal="center", vertical="center")
     left = Alignment(horizontal="left", vertical="center")
 
+    # --- CHANGE: "Die #" now uses "die_display" key so it shows e.g. "Athena-8.9" ---
     labels = [
         ("Angle", "Degrees", "angle"),
         ("Temperature", "C", "temperature"),
         ("Vdd_core", "V", "vdd_core"),
         ("Vdd_io", "V", "vdd_io"),
-        ("Die #", "", "die"),
+        ("Die #", "", "die_display"),
         ("Particle", "", "particle"),
         ("Run", "", "run"),
         ("Code Used", "", "code_used"),
@@ -488,8 +513,16 @@ def build_summary_excel(folder: str, out_xlsx: str, ro_data: ROData, sr_count: i
     ws.cell(row=table_start_row, column=2, value="# of BlackBoxes").font = header_font
     ws.cell(row=table_start_row, column=3, value="# of FF/BB (Athena ref)").font = header_font
 
+    # --- CHANGE: block now has 6 data columns (added FF/BB per die before # of Errors) ---
+    # Layout within each run block:
+    #   +0 : meta values (rows 1-13) / "# of FF/BB" header+values (row 15+)
+    #   +1 : "# of Errors" header+values
+    #   +2 : CrossSection/FF(cm^2)
+    #   +3 : Lower
+    #   +4 : Upper
+    #   +5 : FIT
     block_start_col = 5
-    block_width = 8
+    block_width = 8   # unchanged; 6 used + 2 gap
     gap = 2
 
     for idx, fpath in enumerate(seu_files):
@@ -501,44 +534,48 @@ def build_summary_excel(folder: str, out_xlsx: str, ro_data: ROData, sr_count: i
         start_col = block_start_col + idx * (block_width + gap)
 
         ws.column_dimensions[get_column_letter(start_col)].width = 14
-        ws.column_dimensions[get_column_letter(start_col + 1)].width = 28
-        ws.column_dimensions[get_column_letter(start_col + 2)].width = 14
+        ws.column_dimensions[get_column_letter(start_col + 1)].width = 14
+        ws.column_dimensions[get_column_letter(start_col + 2)].width = 28
         ws.column_dimensions[get_column_letter(start_col + 3)].width = 14
         ws.column_dimensions[get_column_letter(start_col + 4)].width = 14
+        ws.column_dimensions[get_column_letter(start_col + 5)].width = 14
 
         for r in list(range(1, len(labels) + 1)) + list(range(table_start_row, table_start_row + 1 + sr_count)):
             for c in range(start_col, start_col + block_width):
                 ws.cell(row=r, column=c).fill = pink
 
+        # Meta values in start_col (rows 1-13)
         for r, (_, _, key) in enumerate(labels, start=1):
             ws.cell(row=r, column=start_col, value=meta.get(key, "---")).alignment = center
             ws.cell(row=r, column=start_col).font = header_font
 
-        ws.cell(row=table_start_row, column=start_col + 0, value="# of Errors").font = header_font
-        ws.cell(row=table_start_row, column=start_col + 1, value="CrossSection/FF(cm^2)").font = header_font
-        ws.cell(row=table_start_row, column=start_col + 2, value="Lower").font = header_font
-        ws.cell(row=table_start_row, column=start_col + 3, value="Upper").font = header_font
-        ws.cell(row=table_start_row, column=start_col + 4, value="FIT").font = header_font
-
+        # Table headers at table_start_row
         die = meta.get("die", "---")
+        ws.cell(row=table_start_row, column=start_col + 0, value="# of FF/BB").font = header_font
+        ws.cell(row=table_start_row, column=start_col + 1, value="# of Errors").font = header_font
+        ws.cell(row=table_start_row, column=start_col + 2, value="CrossSection/FF(cm^2)").font = header_font
+        ws.cell(row=table_start_row, column=start_col + 3, value="Lower").font = header_font
+        ws.cell(row=table_start_row, column=start_col + 4, value="Upper").font = header_font
+        ws.cell(row=table_start_row, column=start_col + 5, value="FIT").font = header_font
 
         for i in range(sr_count):
             err_i = int(errors.iloc[i])
-            ws.cell(row=table_start_row + 1 + i, column=start_col + 0, value=err_i).alignment = center
 
-            ff_per_bb = get_ff_per_sr(die, i)  # <-- FIX: Zeus vs Athena
+            # --- CHANGE: use correct FF/BB for this run's die (Zeus or Athena) ---
+            ff_per_bb = get_ff_per_sr(die, i)
             total_ffs = NUM_BLACKBOXES * ff_per_bb
             exposure = fluence * float(total_ffs)
 
             xs_per_ff = (err_i / exposure) if exposure > 0 else 0.0
             lo, hi = poisson_rate_ci_95(err_i, exposure)
-
-            ws.cell(row=table_start_row + 1 + i, column=start_col + 1, value=xs_per_ff).alignment = center
-            ws.cell(row=table_start_row + 1 + i, column=start_col + 2, value=lo).alignment = center
-            ws.cell(row=table_start_row + 1 + i, column=start_col + 3, value=hi).alignment = center
-
             fit = xs_per_ff * FIT_SCALE * FIT_FACTOR
-            ws.cell(row=table_start_row + 1 + i, column=start_col + 4, value=fit).alignment = center
+
+            ws.cell(row=table_start_row + 1 + i, column=start_col + 0, value=ff_per_bb).alignment = center
+            ws.cell(row=table_start_row + 1 + i, column=start_col + 1, value=err_i).alignment = center
+            ws.cell(row=table_start_row + 1 + i, column=start_col + 2, value=xs_per_ff).alignment = center
+            ws.cell(row=table_start_row + 1 + i, column=start_col + 3, value=lo).alignment = center
+            ws.cell(row=table_start_row + 1 + i, column=start_col + 4, value=hi).alignment = center
+            ws.cell(row=table_start_row + 1 + i, column=start_col + 5, value=fit).alignment = center
 
     wb.save(out_xlsx)
 
@@ -566,9 +603,12 @@ def build_long_format_excel(folder: str, out_long_xlsx: str, ro_data: ROData, sr
         actual_freq_mhz = compute_actual_frequency_mhz(meta, ro_data)
         die = meta.get("die", "---")
 
+        # --- CHANGE: use die_display ("Athena-8.9") instead of bare die name ---
+        die_display = meta.get("die_display", die)
+
         for sr in range(sr_count):
             err_cnt = int(errors.iloc[sr])
-            ff_per_bb = get_ff_per_sr(die, sr)  # <-- FIX: Zeus vs Athena
+            ff_per_bb = get_ff_per_sr(die, sr)
             total_ffs = NUM_BLACKBOXES * ff_per_bb
             exposure = fluence * float(total_ffs)
 
@@ -587,9 +627,9 @@ def build_long_format_excel(folder: str, out_long_xlsx: str, ro_data: ROData, sr
                 "brd": meta.get("board", "---"),
                 "actual_freq": actual_freq_mhz,
                 "fluence": fluence,
-                "die": die,
+                "die": die_display,          # now shows e.g. "Athena-8.9"
                 "# of blackboxes": NUM_BLACKBOXES,
-                "# of FF/BB": ff_per_bb,
+                "# of FF/BB": ff_per_bb,     # correct Zeus or Athena value
                 "SR_NUM": sr,
                 "err_cnt": err_cnt,
                 "cs": cs,
